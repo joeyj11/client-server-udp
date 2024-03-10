@@ -51,12 +51,91 @@ int main() {
     // Open the target file for writing (always write to output.txt)
     FILE *fp = fopen("output.txt", "wb");
 
-    // TODO: Receive file from the client and save it as output.txt
-
+   // TODO: Receive file from the client and save it as output.txt
+    ssize_t received_bytes;
+    char collected_segments[8000][PAYLOAD_SIZE];
+    int rec_flgs[8000] = {0};
+    int total_coll = 0;
+    int tail_len = 0;
     
+    struct timeval timeout_data;
+    timeout_data.tv_sec = TIMEOUT;
+    timeout_data.tv_usec = 0;
+    
+    while(1){
+        received_bytes = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
 
+        fd_set read_file_descriptors;
+        FD_ZERO(&read_file_descriptors);
+        FD_SET(listen_sockfd, &read_file_descriptors);
+
+        int select_result = select(listen_sockfd + 1, &read_file_descriptors, NULL, NULL, &timeout_data);
+
+        // Handle `select()` timeout: no data received in the given time frame.
+        if (select_result == 0) {
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+            continue;
+                    
+        }
+        //Handle error in select
+        else if (select_result == -1) {
+            perror("Select error. Exiting...");
+            fclose(fp);
+            close(listen_sockfd);
+            close(send_sockfd);
+            return 1;
+        }
+
+        // Handle packets that are out of order but not a last packet case.
+        if (buffer.seqnum < expected_seq_num && !(buffer.last == 1 && expected_seq_num - 1 == buffer.seqnum)){
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+            continue;
+        }         
+
+        
+        if (!rec_flgs[buffer.seqnum]) {
+                    memcpy(collected_segments[buffer.seqnum], buffer.payload, buffer.length);
+                    rec_flgs[buffer.seqnum] = 1;
+                }
+        
+        if (buffer.seqnum > total_coll)
+            total_coll = buffer.seqnum;
+        
+        if (expected_seq_num == buffer.seqnum) {
+            while (rec_flgs[expected_seq_num] == 1)
+                expected_seq_num++;
+        }
+            
+            
+        // Check if the received packet is the last one.
+        printf("Received packet with seqnum: %d and last flag: %d\n", buffer.seqnum, buffer.last);
+        fflush(stdout);
+        if (buffer.last == 1 && expected_seq_num - 1 == buffer.seqnum) {
+            tail_len = buffer.length;
+            build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 1, "0"); // Assuming build_packet properly sets the last flag based on its argument
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+            break;
+        }
+        build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+        sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+    }
+    
+    for (int i = 0; i < total_coll; i++) {
+        fwrite(collected_segments[i], 1, PAYLOAD_SIZE, fp);
+    }
+
+
+    // Write the final packet's data to the file if it wasn't a full-sized packet.
+    if (tail_len > 0) { fwrite(collected_segments[total_coll], 1, tail_len, fp); }
+    
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
     return 0;
 }
+
+
+    
+    

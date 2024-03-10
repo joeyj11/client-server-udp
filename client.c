@@ -4,7 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-
+#include <stdbool.h>
 #include "utils.h"
 
 
@@ -72,11 +72,133 @@ int main(int argc, char *argv[]) {
 
     // TODO: Read from file, and initiate reliable data transfer to the server
 
- 
+    int total_length;
+    fseek(fp, 0, SEEK_END);
+    total_length = ftell(fp);
+    int total_packets = total_length/PAYLOAD_SIZE + (total_length % PAYLOAD_SIZE != 0);
+
+    fseek(fp, 0, SEEK_SET);
+
+    ssize_t bytes_read;
+    struct packet segments[total_packets];
+    while((bytes_read = fread(buffer, 1, PAYLOAD_SIZE, fp)) > 0) {
+        if (bytes_read < PAYLOAD_SIZE) {
+            last = 1;
+        }
+        build_packet(&pkt, seq_num, ack_num, last, ack, bytes_read, (const char*) buffer);
+        segments[seq_num] = pkt;
+        seq_num++;
+    }
     
+    tv.tv_sec = (long)TIMEOUT;
+    tv.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
+ 
+    int last_seq_num_sent = seq_num;
+    ssize_t bytes_recv;
+    seq_num = 0;
+    float current_window = 10;
+    int ssthreshold = 16;
+    int duplicate_acknowledge = 0;
+    int current_acknowledge = 0;
+    int in_flight_packets = 0;
+    int fast_retransmit = 0;
     fclose(fp);
+
+    // printf("Sending %d packets.\nThe last sequence number sent is %d.\n", total_packets, last_seq_num_sent);
+    // fflush(stdout);
+
+    bool last_packet_acked = false;
+
+    while(1){
+        if (in_flight_packets < (int)current_window){
+            for (int i = seq_num; i < seq_num + (int)current_window && i < total_packets; i++)
+            {
+                sendto(send_sockfd, &segments[i], sizeof(segments[i]), 0, (struct sockaddr *)&server_addr_to, addr_size);
+                in_flight_packets++;
+            }
+        }
+
+        fd_set read_file_descriptors;
+        FD_ZERO(&read_file_descriptors);
+        FD_SET(listen_sockfd, &read_file_descriptors);
+
+        int select_result = select(listen_sockfd + 1, &read_file_descriptors, NULL, NULL, &tv);
+        if (select_result == 0) {
+            // if a timeout occurs, set the ssthreshold to half the current window size
+            if (current_window/2 > 2)
+                ssthreshold = current_window/2;
+            else
+                ssthreshold = 2;
+            current_window = 1;
+            in_flight_packets = 0;
+            tv.tv_sec = (long)TIMEOUT;
+            tv.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
+            continue;
+                    
+        }
+            // select error, exit out
+        else if (select_result == -1) {
+            fclose(fp);
+            close(listen_sockfd);
+            close(send_sockfd);
+            perror("Select statement error. Exiting.");
+            return 1;
+        }
+
+        // otherwise no timeout, read the bytes that we received
+        bytes_recv = recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size);
+        if (bytes_recv > 0){
+            tv.tv_sec = (long)TIMEOUT;
+            tv.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
+            printf("Ack_pkt seqnum %d, acknum %d, last %d, ack %d, length %d, payload %s\n", ack_pkt.seqnum, ack_pkt.acknum, ack_pkt.last, ack_pkt.ack, ack_pkt.length, ack_pkt.payload);
+            fflush(stdout);
+            // if we are on the last packet, we want to exit after it is sent:
+            if (ack_pkt.acknum == last_seq_num_sent) {
+                // printf("Ackpkt.last is %d\n", ack_pkt.last);
+                // fflush(stdout);
+                if (ack_pkt.last == 1) {
+                    // printf("Last packet acknowledged. File transfer complete.\n");
+                    // fflush(stdout);
+                    last_packet_acked = true; // Set the flag when the last packet is acknowledged
+                    break; // Break out of the loop
+                }
+            }
+
+            // if the acknum is not equal to the current acknum, we want to update the window size
+            if (ack_pkt.acknum != current_acknowledge){
+                if (fast_retransmit == 1){
+                    current_window = ssthreshold;
+                    fast_retransmit = 0;
+                }
+                else{
+                    if ((int)current_window > ssthreshold) { current_window += (float)(ack_pkt.acknum - current_acknowledge)/current_window; }
+                    else { current_window += (ack_pkt.acknum - current_acknowledge); }
+                }
+                in_flight_packets -= (ack_pkt.acknum - current_acknowledge);
+                current_acknowledge = ack_pkt.acknum;
+                duplicate_acknowledge = 0;
+            }
+            else { duplicate_acknowledge++; }
+            seq_num = ack_pkt.acknum;
+
+            // if we have received 3 duplicate acks, we want to retransmit the packet
+            if (duplicate_acknowledge == 3) {
+                fast_retransmit = 1;
+                if (current_window/2 > 2) { ssthreshold = current_window/2; }
+                else { ssthreshold = 2; }
+
+                current_window = ssthreshold + 3;
+                sendto(send_sockfd, &segments[seq_num], sizeof(segments[seq_num]), 0, (struct sockaddr *)&server_addr_to, addr_size);
+            }
+            
+            // if we have more than three duplicate ACKs, we want to MD the window size
+            if (duplicate_acknowledge > 3){
+                current_window = current_window/2;
+            }
+        }
+    }
+
     close(listen_sockfd);
     close(send_sockfd);
     return 0;
 }
-

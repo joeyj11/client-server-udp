@@ -1,2 +1,26 @@
-Please concisely describe your congestion control scheme here.
-No need to be verbose, brief descriptions/bullet points are preferred.
+Congestion control is implemented in my code in the following ways in our code:
+
+1. Slow Start
+- The current_window variable represents the congestion window size and starts at one, 
+while growing exponentionally based on how many acknowledged packets there were.
+- Each acknowledge will grow the window size that allows more packets to be in flight
+
+2. Fast Retransmit
+- When three duplicate ACKs are received, a fast retransmit occurs where the missing 
+packet is assumed lost and will be immediately retransmitted
+
+3. Multiplicative Decrease
+- When we do a fast retransmit, the threshold is halved in order to quickly reduce the
+amount of packets being sent, so as to make sure the server does not become bogged
+down and overloaded
+- When a new ACK does come, the current window will be set to the threshold size,
+therefore reducing congestion.
+
+4. Timeout
+- Given the timeout time, we can help stop congestion by reducing the threshold and 
+the current window multiplicatively in order to heavily reduce load on the server
+
+
+Additionally, we also implemented some other features including:
+1. Handling dropped or lost packets to retransmit and ensure data reliability
+2. Handling out of order reception of packets and retransmitting
