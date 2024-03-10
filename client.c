@@ -96,8 +96,8 @@ int main(int argc, char *argv[]) {
     int last_seq_num_sent = seq_num;
     ssize_t bytes_recv;
     seq_num = 0;
-    float current_window = 10;
-    int ssthreshold = 16;
+    float current_window = 5;
+    int ssthreshold = 3;
     int duplicate_acknowledge = 0;
     int current_acknowledge = 0;
     int in_flight_packets = 0;
@@ -106,8 +106,6 @@ int main(int argc, char *argv[]) {
 
     // printf("Sending %d packets.\nThe last sequence number sent is %d.\n", total_packets, last_seq_num_sent);
     // fflush(stdout);
-
-    bool last_packet_acked = false;
 
     while(1){
         if (in_flight_packets < (int)current_window){
@@ -148,8 +146,8 @@ int main(int argc, char *argv[]) {
         // otherwise no timeout, read the bytes that we received
         bytes_recv = recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size);
         if (bytes_recv > 0){
-            tv.tv_sec = (long)TIMEOUT;
-            tv.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
+            tv.tv_sec = 0;//(long)TIMEOUT;
+            tv.tv_usec = 300000;//(long)((TIMEOUT - (long)TIMEOUT) * 1e6);
             printf("Ack_pkt seqnum %d, acknum %d, last %d, ack %d, length %d, payload %s\n", ack_pkt.seqnum, ack_pkt.acknum, ack_pkt.last, ack_pkt.ack, ack_pkt.length, ack_pkt.payload);
             fflush(stdout);
             // if we are on the last packet, we want to exit after it is sent:
@@ -159,7 +157,6 @@ int main(int argc, char *argv[]) {
                 if (ack_pkt.last == 1) {
                     // printf("Last packet acknowledged. File transfer complete.\n");
                     // fflush(stdout);
-                    last_packet_acked = true; // Set the flag when the last packet is acknowledged
                     break; // Break out of the loop
                 }
             }
@@ -171,7 +168,7 @@ int main(int argc, char *argv[]) {
                     fast_retransmit = 0;
                 }
                 else{
-                    if ((int)current_window > ssthreshold) { current_window += (float)(ack_pkt.acknum - current_acknowledge)/current_window; }
+                    if ((int)current_window > ssthreshold) { current_window += (float)(1/current_window);}//{ current_window += (float)(ack_pkt.acknum - current_acknowledge)/current_window; }
                     else { current_window += (ack_pkt.acknum - current_acknowledge); }
                 }
                 in_flight_packets -= (ack_pkt.acknum - current_acknowledge);
