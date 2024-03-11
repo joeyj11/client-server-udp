@@ -91,21 +91,18 @@ int main(int argc, char *argv[]) {
     }
     
     tv.tv_sec = 0;
-    tv.tv_usec = 200000;
+    tv.tv_usec = 500000;
  
     int last_seq_num_sent = seq_num;
     ssize_t bytes_recv;
     seq_num = 0;
     float current_window = 5;
-    int ssthreshold = 3;
+    int ssthreshold = 64;
     int duplicate_acknowledge = 0;
     int current_acknowledge = 0;
     int in_flight_packets = 0;
     int fast_retransmit = 0;
     fclose(fp);
-
-    // printf("Sending %d packets.\nThe last sequence number sent is %d.\n", total_packets, last_seq_num_sent);
-    // fflush(stdout);
 
     while(1){
         if (in_flight_packets < (int)current_window){
@@ -113,6 +110,7 @@ int main(int argc, char *argv[]) {
             {
                 sendto(send_sockfd, &segments[i], sizeof(segments[i]), 0, (struct sockaddr *)&server_addr_to, addr_size);
                 in_flight_packets++;
+                usleep(1000);// Add this header for usleep()
             }
         }
 
@@ -126,8 +124,8 @@ int main(int argc, char *argv[]) {
             if (current_window/2 > 2)
                 ssthreshold = current_window/2;
             else
-                ssthreshold = 2;
-            current_window = 1;
+                ssthreshold = 64;
+            current_window = 5;
             in_flight_packets = 0;
             continue;
                     
@@ -146,12 +144,6 @@ int main(int argc, char *argv[]) {
         if (bytes_recv > 0){
             printf("Ack_pkt seqnum %d, acknum %d, last %d, ack %d, length %d, payload %s\n", ack_pkt.seqnum, ack_pkt.acknum, ack_pkt.last, ack_pkt.ack, ack_pkt.length, ack_pkt.payload);
             fflush(stdout);
-            // if we are on the last packet, we want to exit after it is sent:
-            if (ack_pkt.acknum == last_seq_num_sent) {
-                if (ack_pkt.last == 1) {
-                    break; // Break out of the loop
-                }
-            }
 
             // if the acknum is not equal to the current acknum, we want to update the window size
             if (ack_pkt.acknum != current_acknowledge){
@@ -183,6 +175,12 @@ int main(int argc, char *argv[]) {
             // if we have more than three duplicate ACKs, we want to MD the window size
             if (duplicate_acknowledge > 3){
                 current_window = current_window/2;
+            }
+            // if we are on the last packet, we want to exit after it is sent:
+            if (ack_pkt.acknum == last_seq_num_sent) {
+                if (ack_pkt.last == 1) {
+                    break; // Break out of the loop
+                }
             }
         }
     }
