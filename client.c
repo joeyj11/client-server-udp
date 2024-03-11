@@ -90,8 +90,8 @@ int main(int argc, char *argv[]) {
         seq_num++;
     }
     
-    tv.tv_sec = (long)TIMEOUT;
-    tv.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
+    tv.tv_sec = 0;
+    tv.tv_usec = 200000;
  
     int last_seq_num_sent = seq_num;
     ssize_t bytes_recv;
@@ -129,8 +129,6 @@ int main(int argc, char *argv[]) {
                 ssthreshold = 2;
             current_window = 1;
             in_flight_packets = 0;
-            tv.tv_sec = (long)TIMEOUT;
-            tv.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
             continue;
                     
         }
@@ -146,17 +144,11 @@ int main(int argc, char *argv[]) {
         // otherwise no timeout, read the bytes that we received
         bytes_recv = recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size);
         if (bytes_recv > 0){
-            tv.tv_sec = 0;//(long)TIMEOUT;
-            tv.tv_usec = 300000;//(long)((TIMEOUT - (long)TIMEOUT) * 1e6);
             printf("Ack_pkt seqnum %d, acknum %d, last %d, ack %d, length %d, payload %s\n", ack_pkt.seqnum, ack_pkt.acknum, ack_pkt.last, ack_pkt.ack, ack_pkt.length, ack_pkt.payload);
             fflush(stdout);
             // if we are on the last packet, we want to exit after it is sent:
             if (ack_pkt.acknum == last_seq_num_sent) {
-                // printf("Ackpkt.last is %d\n", ack_pkt.last);
-                // fflush(stdout);
                 if (ack_pkt.last == 1) {
-                    // printf("Last packet acknowledged. File transfer complete.\n");
-                    // fflush(stdout);
                     break; // Break out of the loop
                 }
             }

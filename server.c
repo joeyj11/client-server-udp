@@ -59,8 +59,8 @@ int main() {
     int tail_len = 0;
     
     struct timeval timeout_data;
-    timeout_data.tv_sec = TIMEOUT;
-    timeout_data.tv_usec = 0;
+    timeout_data.tv_sec = 0;
+    timeout_data.tv_usec = 200000;
     
     while(1){
         received_bytes = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
@@ -114,6 +114,10 @@ int main() {
         fflush(stdout);
         if (buffer.last == 1 && expected_seq_num - 1 == buffer.seqnum) {
             tail_len = buffer.length;
+            build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 1, "0"); // Assuming build_packet properly sets the last flag based on its argument
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+            build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 1, "0"); // Assuming build_packet properly sets the last flag based on its argument
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
             build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 1, "0"); // Assuming build_packet properly sets the last flag based on its argument
             sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
             break;
