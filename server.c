@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <errno.h>
 #include "utils.h"
 
 int main() {
@@ -59,13 +59,15 @@ int main() {
     int tail_len = 0;
     
     struct timeval timeout_data;
-    timeout_data.tv_sec = 0;
-    timeout_data.tv_usec = 500000;
-    
+    timeout_data.tv_sec = 3;
+    timeout_data.tv_usec = 0;
+    setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_data, sizeof(timeout_data));
+
     while(1){
         received_bytes = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
 
-        if (received_bytes == 0) {
+        if (errno == EWOULDBLOCK) {
+        // Timeout occurred, assume client has closed the connection
             break;
         }
 
@@ -123,6 +125,10 @@ int main() {
         }
         build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
         sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+        // if (received_bytes > 0 && strcmp(buffer.payload, "END") == 0) {
+        //     printf("Termination packet received. Client has closed the connection.\n");
+        //     break;
+        // }
     }
     
     for (int i = 0; i < total_coll; i++) {

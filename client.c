@@ -179,6 +179,8 @@ int main(int argc, char *argv[]) {
             // if we are on the last packet, we want to exit after it is sent:
             if (ack_pkt.acknum == last_seq_num_sent) {
                 if (ack_pkt.last == 1) {
+                    build_packet(&pkt, seq_num, ack_num, 1, ack, 0, "END"); // 'END' can be a unique string to indicate termination
+                    sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size);
                     break; // Break out of the loop
                 }
             }
