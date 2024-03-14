@@ -9,6 +9,7 @@
 
 
 int main(int argc, char *argv[]) {
+    clock_t start = clock();
     int listen_sockfd, send_sockfd;
     struct sockaddr_in client_addr, server_addr_to, server_addr_from;
     socklen_t addr_size = sizeof(server_addr_to);
@@ -108,6 +109,7 @@ int main(int argc, char *argv[]) {
         if (in_flight_packets < (int)current_window){
             for (int i = seq_num; i < seq_num + (int)current_window && i < total_packets; i++)
             {
+                printf("Sending packet %d\n", i);
                 sendto(send_sockfd, &segments[i], sizeof(segments[i]), 0, (struct sockaddr *)&server_addr_to, addr_size);
                 in_flight_packets++;
                 usleep(1000);// Add this header for usleep()
@@ -119,13 +121,23 @@ int main(int argc, char *argv[]) {
         FD_SET(listen_sockfd, &read_file_descriptors);
 
         int select_result = select(listen_sockfd + 1, &read_file_descriptors, NULL, NULL, &tv);
-        if (select_result == 0) {
+        if (select_result == 0) { // A timeout has occured, check
             // if a timeout occurs, set the ssthreshold to half the current window size
-            if (current_window/2 > 2)
+            if (fast_retransmit == 1) {
                 ssthreshold = current_window/2;
-            else
-                ssthreshold = 64;
-            current_window = 5;
+                current_window = 5;
+                duplicate_acknowledge = 0;
+            }
+            else if ((int)current_window >= ssthreshold) { 
+                ssthreshold = current_window/2;
+                current_window = 5;
+                duplicate_acknowledge = 0;
+            }
+            else { 
+                ssthreshold = current_window/2;
+                current_window = 5; 
+                duplicate_acknowledge = 0;
+            }
             in_flight_packets = 0;
             continue;
                     
@@ -149,11 +161,15 @@ int main(int argc, char *argv[]) {
             if (ack_pkt.acknum != current_acknowledge){
                 if (fast_retransmit == 1){
                     current_window = ssthreshold;
+                    duplicate_acknowledge = 0;
                     fast_retransmit = 0;
                 }
+                else if ((int)current_window >= ssthreshold) { 
+                    current_window += 5; 
+                    duplicate_acknowledge = 0;
+                }
                 else{
-                    if ((int)current_window > ssthreshold) { current_window += (float)(1/current_window);}//{ current_window += (float)(ack_pkt.acknum - current_acknowledge)/current_window; }
-                    else { current_window += (ack_pkt.acknum - current_acknowledge); }
+                    current_window += 5; 
                 }
                 in_flight_packets -= (ack_pkt.acknum - current_acknowledge);
                 current_acknowledge = ack_pkt.acknum;
@@ -165,10 +181,10 @@ int main(int argc, char *argv[]) {
             // if we have received 3 duplicate acks, we want to retransmit the packet
             if (duplicate_acknowledge == 3) {
                 fast_retransmit = 1;
-                if (current_window/2 > 2) { ssthreshold = current_window/2; }
-                else { ssthreshold = 2; }
-
+                ssthreshold = current_window/2;
                 current_window = ssthreshold + 3;
+
+                printf("Retransmitting packet %d\n", seq_num);
                 sendto(send_sockfd, &segments[seq_num], sizeof(segments[seq_num]), 0, (struct sockaddr *)&server_addr_to, addr_size);
             }
             
@@ -179,14 +195,15 @@ int main(int argc, char *argv[]) {
             // if we are on the last packet, we want to exit after it is sent:
             if (ack_pkt.acknum == last_seq_num_sent) {
                 if (ack_pkt.last == 1) {
-                    build_packet(&pkt, seq_num, ack_num, 1, ack, 0, "END"); // 'END' can be a unique string to indicate termination
-                    sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size);
                     break; // Break out of the loop
                 }
             }
         }
     }
-
+    clock_t end = clock();
+    double time_spent = (double)(end - start) / CLOCKS_PER_SEC;
+    printf("Time spent: %f\n", time_spent);
+    // Send packet for the server to shutdown if it doesn't receive it it's okay since we have a failsafe
     close(listen_sockfd);
     close(send_sockfd);
     return 0;

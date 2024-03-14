@@ -59,29 +59,38 @@ int main() {
     int tail_len = 0;
     
     struct timeval timeout_data;
-    timeout_data.tv_sec = 3;
+    timeout_data.tv_sec = 2;
     timeout_data.tv_usec = 0;
     setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_data, sizeof(timeout_data));
 
     while(1){
         received_bytes = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
 
-        if (errno == EWOULDBLOCK) {
-        // Timeout occurred, assume client has closed the connection
-            break;
+        if (received_bytes < 0) {
+            if (errno == EWOULDBLOCK) {
+                if (timeout_data.tv_sec == 5) {
+                    timeout_data.tv_sec = 2;
+                    printf("Initial timeout set to 2 seconds.\n");
+                }
+                else{
+                    printf("Timeout occurred. No data received for 2 seconds.\n");
+                    break; // Assume client has stopped sending data and exit loop
+                }
+            } else {
+                perror("recvfrom failed");
+                break; // Handle other errors
         }
-
+    }
         fd_set read_file_descriptors;
         FD_ZERO(&read_file_descriptors);
         FD_SET(listen_sockfd, &read_file_descriptors);
 
         int select_result = select(listen_sockfd + 1, &read_file_descriptors, NULL, NULL, &timeout_data);
-
         // Handle `select()` timeout: no data received in the given time frame.
         if (select_result == 0) {
             build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
             sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
-            continue;
+            break;
                     
         }
         //Handle error in select
@@ -92,6 +101,8 @@ int main() {
             close(send_sockfd);
             return 1;
         }
+
+        // Client initiated graceful shutdown
 
         // Handle packets that are out of order but not a last packet case.
         if (buffer.seqnum < expected_seq_num && !(buffer.last == 1 && expected_seq_num - 1 == buffer.seqnum)){
@@ -113,7 +124,7 @@ int main() {
             while (rec_flgs[expected_seq_num] == 1)
                 expected_seq_num++;
         }
-            
+        
             
         // Check if the received packet is the last one.
         printf("Received packet with seqnum: %d and last flag: %d and expected sequence number of: %d\n", buffer.seqnum, buffer.last, expected_seq_num);
@@ -123,12 +134,10 @@ int main() {
             build_packet(&ack_pkt, 0, expected_seq_num, buffer.last, 1, 1, "0"); // Assuming build_packet properly sets the last flag based on its argument
             sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
         }
-        build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
-        sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
-        // if (received_bytes > 0 && strcmp(buffer.payload, "END") == 0) {
-        //     printf("Termination packet received. Client has closed the connection.\n");
-        //     break;
-        // }
+        else{
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+        }
     }
     
     for (int i = 0; i < total_coll; i++) {
@@ -144,7 +153,3 @@ int main() {
     close(send_sockfd);
     return 0;
 }
-
-
-    
-    
